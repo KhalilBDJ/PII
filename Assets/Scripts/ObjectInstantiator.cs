@@ -67,11 +67,15 @@ public class ObjectInstantiator : MonoBehaviour
     {
         if (_instantiatedPrefabs.TryGetValue(trackedImage.referenceImage.name, out GameObject prefab))
         {
-            prefab.transform.position = trackedImage.transform.position;
-            prefab.transform.rotation = trackedImage.transform.rotation;
+            prefab.transform.position =
+                new Vector3(trackedImage.transform.position.x + trackedImage.transform.position.x / 2,
+                    trackedImage.transform.position.y, trackedImage.transform.position.z);
+            prefab.transform.rotation = Quaternion.Euler(trackedImage.transform.rotation.x,
+                trackedImage.transform.rotation.y, trackedImage.transform.rotation.z);
+            
 
             // Mise à jour de la taille du prefab pour correspondre à celle de l'image
-            Vector3 newScale = new Vector3(trackedImage.size.x * 10, 0.1f, trackedImage.size.y * 10);
+            Vector3 newScale = new Vector3(trackedImage.size.x, trackedImage.size.y, 0.1f );
             prefab.transform.localScale = newScale;
         }
     }
