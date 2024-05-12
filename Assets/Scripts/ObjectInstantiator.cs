@@ -39,6 +39,7 @@ public class ObjectInstantiator : MonoBehaviour
             if (!_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
             {
                 GameObject newPrefab = Instantiate(prefabToSpawn, trackedImage.transform);
+                newPrefab.SetActive(true);
                 _instantiatedPrefabs.Add(trackedImage.referenceImage.name, newPrefab);
             }
 
@@ -67,9 +68,8 @@ public class ObjectInstantiator : MonoBehaviour
     {
         if (_instantiatedPrefabs.TryGetValue(trackedImage.referenceImage.name, out GameObject prefab))
         {
-            prefab.transform.position =
-                new Vector3(trackedImage.transform.position.x + trackedImage.transform.position.x / 2,
-                    trackedImage.transform.position.y, trackedImage.transform.position.z);
+            prefab.transform.localPosition = new Vector3(trackedImage.size.x/2, 0 , 0);
+                
             prefab.transform.rotation = Quaternion.Euler(trackedImage.transform.rotation.x,
                 trackedImage.transform.rotation.y, trackedImage.transform.rotation.z);
             
