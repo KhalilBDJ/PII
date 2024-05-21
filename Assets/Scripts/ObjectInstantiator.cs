@@ -1,19 +1,25 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Networking;
 using UnityEngine.XR.ARFoundation;
-
+using UnityEngine.XR.ARSubsystems;
 
 [RequireComponent(typeof(ARTrackedImageManager))]
 public class ObjectInstantiator : MonoBehaviour
 {
     private ARTrackedImageManager _trackedImageManager;
+    private MutableRuntimeReferenceImageLibrary _mutableLibrary;
+    private List<string> _existingImageNames = new List<string>();
 
     // Prefab à instancier
     public GameObject prefabToSpawn;
 
     // Dictionnaire pour suivre les instances des prefabs
     private readonly Dictionary<string, GameObject> _instantiatedPrefabs = new Dictionary<string, GameObject>();
+
+    // URL de l'API Spring Boot pour récupérer les images
+    private const string apiUrl = "http://localhost:8080/api/images/";
 
     private void Awake()
     {
@@ -22,6 +28,7 @@ public class ObjectInstantiator : MonoBehaviour
 
     private void OnEnable()
     {
+        StartCoroutine(FetchAndLoadImages());
         _trackedImageManager.trackedImagesChanged += OnTrackedImagesChanged;
     }
 
@@ -30,13 +37,65 @@ public class ObjectInstantiator : MonoBehaviour
         _trackedImageManager.trackedImagesChanged -= OnTrackedImagesChanged;
     }
 
+    private IEnumerator FetchAndLoadImages()
+    {
+        UnityWebRequest request = UnityWebRequest.Get(apiUrl);
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.ConnectionError || request.result == UnityWebRequest.Result.ProtocolError)
+        {
+            Debug.LogError("Error fetching images: " + request.error);
+        }
+        else
+        {
+            List<ImageObject> imageObjects = JsonUtility.FromJson<ImageObjectList>("{\"images\":" + request.downloadHandler.text + "}").images;
+
+            _mutableLibrary = _trackedImageManager.referenceLibrary as MutableRuntimeReferenceImageLibrary;
+
+            if (_mutableLibrary == null)
+            {
+                Debug.LogError("Failed to get MutableRuntimeReferenceImageLibrary.");
+                yield break;
+            }
+
+            // Clear the existing library
+            ClearExistingLibrary();
+
+            // Add new images to the AR library
+            foreach (ImageObject imageObject in imageObjects)
+            {
+                if (!_existingImageNames.Contains(imageObject.name))
+                {
+                    AddImageToLibrary(imageObject);
+                    _existingImageNames.Add(imageObject.name);
+                }
+            }
+        }
+    }
+
+    private void ClearExistingLibrary()
+    {
+        _mutableLibrary = _trackedImageManager.CreateRuntimeLibrary() as MutableRuntimeReferenceImageLibrary;
+        _trackedImageManager.referenceLibrary = _mutableLibrary;
+        _existingImageNames.Clear();
+    }
+
+    private void AddImageToLibrary(ImageObject imageObject)
+    {
+        byte[] imageBytes = System.Convert.FromBase64String(imageObject.image);
+        Texture2D texture = new Texture2D(2, 2);
+        texture.LoadImage(imageBytes);
+
+        _mutableLibrary.ScheduleAddImageWithValidationJob(texture, imageObject.name, 0.5f);
+    }
+
     private void OnTrackedImagesChanged(ARTrackedImagesChangedEventArgs eventArgs)
     {
         // Pour chaque image nouvellement détectée
         foreach (ARTrackedImage trackedImage in eventArgs.added)
         {
             // Instancie un nouveau prefab s'il n'existe pas encore
-            if (!_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
+            if (!_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name) && _mutableLibrary.count>0)
             {
                 GameObject newPrefab = Instantiate(prefabToSpawn, trackedImage.transform);
                 newPrefab.SetActive(true);
@@ -68,15 +127,27 @@ public class ObjectInstantiator : MonoBehaviour
     {
         if (_instantiatedPrefabs.TryGetValue(trackedImage.referenceImage.name, out GameObject prefab))
         {
-            prefab.transform.localPosition = new Vector3(trackedImage.size.x/2, 0 , 0);
-                
-            prefab.transform.rotation = Quaternion.Euler(trackedImage.transform.rotation.x,
-                trackedImage.transform.rotation.y, trackedImage.transform.rotation.z);
-            
+            prefab.transform.localPosition = new Vector3(trackedImage.size.x / 2, 0, 0);
+
+            prefab.transform.rotation = Quaternion.Euler(trackedImage.transform.rotation.eulerAngles);
 
             // Mise à jour de la taille du prefab pour correspondre à celle de l'image
-            Vector3 newScale = new Vector3(trackedImage.size.x, trackedImage.size.y, 0.1f );
+            Vector3 newScale = new Vector3(trackedImage.size.x, trackedImage.size.y, 0.1f);
             prefab.transform.localScale = newScale;
         }
     }
+}
+
+[System.Serializable]
+public class ImageObject
+{
+    public string name;
+    public string image;  // Base64 encoded string
+    public string text;
+}
+
+[System.Serializable]
+public class ImageObjectList
+{
+    public List<ImageObject> images;
 }
