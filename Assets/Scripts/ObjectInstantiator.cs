@@ -1,7 +1,9 @@
 using System.Collections;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.UI;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 
@@ -12,6 +14,9 @@ public class ObjectInstantiator : MonoBehaviour
     private MutableRuntimeReferenceImageLibrary _mutableLibrary;
     private List<string> _existingImageNames = new List<string>();
 
+    public TMP_Text text;
+
+    public RawImage imageTest;
     // Prefab à instancier
     public GameObject prefabToSpawn;
 
@@ -19,7 +24,7 @@ public class ObjectInstantiator : MonoBehaviour
     private readonly Dictionary<string, GameObject> _instantiatedPrefabs = new Dictionary<string, GameObject>();
 
     // URL de l'API Spring Boot pour récupérer les images
-    private const string apiUrl = "http://localhost:8080/api/images/";
+    private const string apiUrl = "http://172.20.10.5:8080/api/images/2";
 
     private void Awake()
     {
@@ -40,21 +45,28 @@ public class ObjectInstantiator : MonoBehaviour
     private IEnumerator FetchAndLoadImages()
     {
         UnityWebRequest request = UnityWebRequest.Get(apiUrl);
+        request.certificateHandler = new AcceptAllCertificatesSignedHandler();
         yield return request.SendWebRequest();
+        text.text = "Fetching";
+
 
         if (request.result == UnityWebRequest.Result.ConnectionError || request.result == UnityWebRequest.Result.ProtocolError)
         {
             Debug.LogError("Error fetching images: " + request.error);
+            text.text = "Error fetching images: " + request.error;
         }
         else
         {
             List<ImageObject> imageObjects = JsonUtility.FromJson<ImageObjectList>("{\"images\":" + request.downloadHandler.text + "}").images;
 
             _mutableLibrary = _trackedImageManager.referenceLibrary as MutableRuntimeReferenceImageLibrary;
+            text.text = "Success";
+
 
             if (_mutableLibrary == null)
             {
                 Debug.LogError("Failed to get MutableRuntimeReferenceImageLibrary.");
+                text.text = "Failed to get MutableRuntimeReferenceImageLibrary.";
                 yield break;
             }
 
@@ -85,7 +97,8 @@ public class ObjectInstantiator : MonoBehaviour
         byte[] imageBytes = System.Convert.FromBase64String(imageObject.image);
         Texture2D texture = new Texture2D(2, 2);
         texture.LoadImage(imageBytes);
-
+        texture.hideFlags = HideFlags.DontUnloadUnusedAsset;
+        imageTest.texture = texture;
         _mutableLibrary.ScheduleAddImageWithValidationJob(texture, imageObject.name, 0.5f);
     }
 
@@ -100,6 +113,7 @@ public class ObjectInstantiator : MonoBehaviour
                 GameObject newPrefab = Instantiate(prefabToSpawn, trackedImage.transform);
                 newPrefab.SetActive(true);
                 _instantiatedPrefabs.Add(trackedImage.referenceImage.name, newPrefab);
+                text.text = trackedImage.referenceImage.name;
             }
 
             // Ajuste la taille du prefab pour qu'il corresponde à celle de l'image détectée
@@ -136,6 +150,8 @@ public class ObjectInstantiator : MonoBehaviour
             prefab.transform.localScale = newScale;
         }
     }
+    
+    
 }
 
 [System.Serializable]
@@ -151,3 +167,12 @@ public class ImageObjectList
 {
     public List<ImageObject> images;
 }
+
+public class AcceptAllCertificatesSignedHandler : CertificateHandler
+{
+    protected override bool ValidateCertificate(byte[] certificateData)
+    {
+        return true; // Certificat toujours valide
+    }
+}
+
