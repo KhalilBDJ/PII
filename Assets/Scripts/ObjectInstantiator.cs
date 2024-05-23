@@ -24,7 +24,7 @@ public class ObjectInstantiator : MonoBehaviour
     private readonly Dictionary<string, GameObject> _instantiatedPrefabs = new Dictionary<string, GameObject>();
 
     // URL de l'API Spring Boot pour récupérer les images
-    private const string apiUrl = "http://172.20.10.5:8080/api/images/2";
+    private const string apiUrl = "http://localhost:8080/api/images/";
 
     private void Awake()
     {
@@ -107,14 +107,18 @@ public class ObjectInstantiator : MonoBehaviour
         // Pour chaque image nouvellement détectée
         foreach (ARTrackedImage trackedImage in eventArgs.added)
         {
-            // Instancie un nouveau prefab s'il n'existe pas encore
-            if (!_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name) && _mutableLibrary.count>0)
+            if (_mutableLibrary.count>0)
             {
-                GameObject newPrefab = Instantiate(prefabToSpawn, trackedImage.transform);
-                newPrefab.SetActive(true);
-                _instantiatedPrefabs.Add(trackedImage.referenceImage.name, newPrefab);
-                text.text = trackedImage.referenceImage.name;
+                // Instancie un nouveau prefab s'il n'existe pas encore
+                if (!_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
+                {
+                    GameObject newPrefab = Instantiate(prefabToSpawn, trackedImage.transform);
+                    newPrefab.SetActive(true);
+                    _instantiatedPrefabs.Add(trackedImage.referenceImage.name, newPrefab);
+                    text.text = trackedImage.referenceImage.name;
+                }
             }
+          
 
             // Ajuste la taille du prefab pour qu'il corresponde à celle de l'image détectée
             UpdatePrefabTransform(trackedImage);

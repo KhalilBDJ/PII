@@ -872,6 +872,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   text: {fileID: 589253867}
+  imageTest: {fileID: 409009499}
   prefabToSpawn: {fileID: 736360854}
 --- !u!1 &344869907
 GameObject:
