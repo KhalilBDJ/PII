@@ -1,6 +1,9 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using TMPro;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -17,13 +20,10 @@ public class ObjectInstantiator : MonoBehaviour
     public TMP_Text text;
 
     public RawImage imageTest;
-    // Prefab à instancier
     public GameObject prefabToSpawn;
 
-    // Dictionnaire pour suivre les instances des prefabs
     private readonly Dictionary<string, GameObject> _instantiatedPrefabs = new Dictionary<string, GameObject>();
 
-    // URL de l'API Spring Boot pour récupérer les images
     private const string apiUrl = "http://localhost:8080/api/images/";
 
     private void Awake()
@@ -49,7 +49,6 @@ public class ObjectInstantiator : MonoBehaviour
         yield return request.SendWebRequest();
         text.text = "Fetching";
 
-
         if (request.result == UnityWebRequest.Result.ConnectionError || request.result == UnityWebRequest.Result.ProtocolError)
         {
             Debug.LogError("Error fetching images: " + request.error);
@@ -62,7 +61,6 @@ public class ObjectInstantiator : MonoBehaviour
             _mutableLibrary = _trackedImageManager.referenceLibrary as MutableRuntimeReferenceImageLibrary;
             text.text = "Success";
 
-
             if (_mutableLibrary == null)
             {
                 Debug.LogError("Failed to get MutableRuntimeReferenceImageLibrary.");
@@ -70,10 +68,8 @@ public class ObjectInstantiator : MonoBehaviour
                 yield break;
             }
 
-            // Clear the existing library
             ClearExistingLibrary();
 
-            // Add new images to the AR library
             foreach (ImageObject imageObject in imageObjects)
             {
                 if (!_existingImageNames.Contains(imageObject.name))
@@ -99,17 +95,30 @@ public class ObjectInstantiator : MonoBehaviour
         texture.LoadImage(imageBytes);
         texture.hideFlags = HideFlags.DontUnloadUnusedAsset;
         imageTest.texture = texture;
-        _mutableLibrary.ScheduleAddImageWithValidationJob(texture, imageObject.name, 0.5f);
+
+        NativeArray<byte> nativeArray = new NativeArray<byte>(imageBytes, Allocator.Persistent);
+        NativeSlice<byte> imageSlice = new NativeSlice<byte>(nativeArray);
+
+        XRReferenceImage referenceImage = new XRReferenceImage(
+            new SerializableGuid(0, 0), // guid doit être vide
+            new SerializableGuid(0, 0), // guid doit être vide
+            new Vector2(0.1f, 0.1f), // size placeholder
+            imageObject.name,
+            texture
+        );
+
+        JobHandle jobHandle = _mutableLibrary.ScheduleAddImageJob(imageSlice, new Vector2Int(texture.width, texture.height), TextureFormat.RGBA32, referenceImage, default(JobHandle));
+        jobHandle.Complete();
+
+        nativeArray.Dispose();
     }
 
     private void OnTrackedImagesChanged(ARTrackedImagesChangedEventArgs eventArgs)
     {
-        // Pour chaque image nouvellement détectée
         foreach (ARTrackedImage trackedImage in eventArgs.added)
         {
-            if (_mutableLibrary.count>0)
+            if (_mutableLibrary.count > 0)
             {
-                // Instancie un nouveau prefab s'il n'existe pas encore
                 if (!_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
                 {
                     GameObject newPrefab = Instantiate(prefabToSpawn, trackedImage.transform);
@@ -118,19 +127,15 @@ public class ObjectInstantiator : MonoBehaviour
                     text.text = trackedImage.referenceImage.name;
                 }
             }
-          
 
-            // Ajuste la taille du prefab pour qu'il corresponde à celle de l'image détectée
             UpdatePrefabTransform(trackedImage);
         }
 
-        // Pour chaque image mise à jour
         foreach (ARTrackedImage trackedImage in eventArgs.updated)
         {
             UpdatePrefabTransform(trackedImage);
         }
 
-        // Gère les images supprimées (désactive les prefabs associés)
         foreach (ARTrackedImage trackedImage in eventArgs.removed)
         {
             if (_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
@@ -140,29 +145,23 @@ public class ObjectInstantiator : MonoBehaviour
         }
     }
 
-    // Met à jour la taille et la position du prefab en fonction de l'image AR détectée
     private void UpdatePrefabTransform(ARTrackedImage trackedImage)
     {
         if (_instantiatedPrefabs.TryGetValue(trackedImage.referenceImage.name, out GameObject prefab))
         {
             prefab.transform.localPosition = new Vector3(trackedImage.size.x / 2, 0, 0);
-
             prefab.transform.rotation = Quaternion.Euler(trackedImage.transform.rotation.eulerAngles);
-
-            // Mise à jour de la taille du prefab pour correspondre à celle de l'image
             Vector3 newScale = new Vector3(trackedImage.size.x, trackedImage.size.y, 0.1f);
             prefab.transform.localScale = newScale;
         }
     }
-    
-    
 }
 
 [System.Serializable]
 public class ImageObject
 {
     public string name;
-    public string image;  // Base64 encoded string
+    public string image;
     public string text;
 }
 
@@ -176,7 +175,6 @@ public class AcceptAllCertificatesSignedHandler : CertificateHandler
 {
     protected override bool ValidateCertificate(byte[] certificateData)
     {
-        return true; // Certificat toujours valide
+        return true;
     }
 }
-
