@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using NUnit.Framework;
 using TMPro;
 using Unity.Collections;
 using UnityEngine;
@@ -8,6 +9,7 @@ using UnityEngine.Networking;
 using UnityEngine.UI;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
+using Image = UnityEngine.UIElements.Image;
 
 [RequireComponent(typeof(ARTrackedImageManager))]
 public class ObjectInstantiator : MonoBehaviour
@@ -27,6 +29,11 @@ public class ObjectInstantiator : MonoBehaviour
     private void Awake()
     {
         _trackedImageManager = GetComponent<ARTrackedImageManager>();
+    }
+
+    private void Update()
+    {
+        //Debug.Log(_trackedImageManager.referenceLibrary.count);
     }
 
     private void OnEnable()
@@ -101,6 +108,7 @@ public class ObjectInstantiator : MonoBehaviour
 
         // Ajouter l'image à la bibliothèque mutable avec la taille par défaut
         _mutableLibrary.ScheduleAddImageWithValidationJob(texture, imageObject.name, defaultSize);
+        Debug.Log("Nombre d'images : " + _trackedImageManager.referenceLibrary.count);
     }
 
     private IEnumerator UpdateRawImage(Texture2D texture)
@@ -113,6 +121,8 @@ public class ObjectInstantiator : MonoBehaviour
     {
         foreach (ARTrackedImage trackedImage in eventArgs.added)
         {
+            text.text = "Image Detected";
+
             if (_mutableLibrary.count > 0)
             {
                 if (!_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
@@ -120,7 +130,7 @@ public class ObjectInstantiator : MonoBehaviour
                     GameObject newPrefab = Instantiate(prefabToSpawn, trackedImage.transform);
                     newPrefab.SetActive(true);
                     _instantiatedPrefabs.Add(trackedImage.referenceImage.name, newPrefab);
-                    text.text = trackedImage.referenceImage.name;
+                    //text.text = trackedImage.referenceImage.name;
                 }
             }
 
@@ -146,7 +156,8 @@ public class ObjectInstantiator : MonoBehaviour
         if (_instantiatedPrefabs.TryGetValue(trackedImage.referenceImage.name, out GameObject prefab))
         {
             prefab.transform.localPosition = new Vector3(trackedImage.size.x / 2, 0, 0);
-            prefab.transform.rotation = Quaternion.Euler(trackedImage.transform.rotation.eulerAngles);
+            Vector3 imageRot = trackedImage.transform.rotation.eulerAngles;
+            prefab.transform.rotation = Quaternion.Euler(new Vector3(imageRot.x + 90, imageRot.y, imageRot.z));
             Vector3 newScale = new Vector3(trackedImage.size.x, trackedImage.size.y, 0.1f);
             prefab.transform.localScale = newScale;
         }
