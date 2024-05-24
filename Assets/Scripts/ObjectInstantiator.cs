@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using Unity.Collections;
-using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -18,13 +17,12 @@ public class ObjectInstantiator : MonoBehaviour
     private List<string> _existingImageNames = new List<string>();
 
     public TMP_Text text;
-
     public RawImage imageTest;
     public GameObject prefabToSpawn;
 
     private readonly Dictionary<string, GameObject> _instantiatedPrefabs = new Dictionary<string, GameObject>();
 
-    private const string apiUrl = "http://localhost:8080/api/images/";
+    private const string apiUrl = "http://172.20.10.3:8080/api/images/";
 
     private void Awake()
     {
@@ -94,23 +92,21 @@ public class ObjectInstantiator : MonoBehaviour
         Texture2D texture = new Texture2D(2, 2);
         texture.LoadImage(imageBytes);
         texture.hideFlags = HideFlags.DontUnloadUnusedAsset;
+
+        // Différer la mise à jour du RawImage pour éviter l'erreur de boucle de reconstruction graphique
+        StartCoroutine(UpdateRawImage(texture));
+
+        // Définir une taille par défaut en mètres
+        float defaultSize = 0.5f; // Par exemple, 0.5 mètres
+
+        // Ajouter l'image à la bibliothèque mutable avec la taille par défaut
+        _mutableLibrary.ScheduleAddImageWithValidationJob(texture, imageObject.name, defaultSize);
+    }
+
+    private IEnumerator UpdateRawImage(Texture2D texture)
+    {
+        yield return new WaitForEndOfFrame();
         imageTest.texture = texture;
-
-        NativeArray<byte> nativeArray = new NativeArray<byte>(imageBytes, Allocator.Persistent);
-        NativeSlice<byte> imageSlice = new NativeSlice<byte>(nativeArray);
-
-        XRReferenceImage referenceImage = new XRReferenceImage(
-            new SerializableGuid(0, 0), // guid doit être vide
-            new SerializableGuid(0, 0), // guid doit être vide
-            new Vector2(0.1f, 0.1f), // size placeholder
-            imageObject.name,
-            texture
-        );
-
-        JobHandle jobHandle = _mutableLibrary.ScheduleAddImageJob(imageSlice, new Vector2Int(texture.width, texture.height), TextureFormat.RGBA32, referenceImage, default(JobHandle));
-        jobHandle.Complete();
-
-        nativeArray.Dispose();
     }
 
     private void OnTrackedImagesChanged(ARTrackedImagesChangedEventArgs eventArgs)
