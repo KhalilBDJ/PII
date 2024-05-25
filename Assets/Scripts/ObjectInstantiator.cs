@@ -1,9 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using NUnit.Framework;
 using TMPro;
 using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -16,24 +16,20 @@ public class ObjectInstantiator : MonoBehaviour
 {
     private ARTrackedImageManager _trackedImageManager;
     private MutableRuntimeReferenceImageLibrary _mutableLibrary;
-    private List<string> _existingImageNames = new List<string>();
+    private ARAnchorManager _anchorManager;
 
     public TMP_Text text;
-    public RawImage imageTest;
     public GameObject prefabToSpawn;
 
     private readonly Dictionary<string, GameObject> _instantiatedPrefabs = new Dictionary<string, GameObject>();
+    private readonly Dictionary<string, ARAnchor> _anchors = new Dictionary<string, ARAnchor>();
 
-    private const string apiUrl = "http://172.20.10.3:8080/api/images/";
+    private const string apiUrl = "http://192.168.1.100:8080/api/images/";
 
     private void Awake()
     {
         _trackedImageManager = GetComponent<ARTrackedImageManager>();
-    }
-
-    private void Update()
-    {
-        //Debug.Log(_trackedImageManager.referenceLibrary.count);
+        _anchorManager = GetComponent<ARAnchorManager>();
     }
 
     private void OnEnable()
@@ -50,87 +46,113 @@ public class ObjectInstantiator : MonoBehaviour
     private IEnumerator FetchAndLoadImages()
     {
         UnityWebRequest request = UnityWebRequest.Get(apiUrl);
-        request.certificateHandler = new AcceptAllCertificatesSignedHandler();
         yield return request.SendWebRequest();
-        text.text = "Fetching";
+        SetUIText("Fetching");
 
         if (request.result == UnityWebRequest.Result.ConnectionError || request.result == UnityWebRequest.Result.ProtocolError)
         {
             Debug.LogError("Error fetching images: " + request.error);
-            text.text = "Error fetching images: " + request.error;
+            SetUIText("Error fetching images: " + request.error);
         }
         else
         {
             List<ImageObject> imageObjects = JsonUtility.FromJson<ImageObjectList>("{\"images\":" + request.downloadHandler.text + "}").images;
 
             _mutableLibrary = _trackedImageManager.referenceLibrary as MutableRuntimeReferenceImageLibrary;
-            text.text = "Success";
+            SetUIText("Success");
+            Debug.Log("C'est un succès");
 
             if (_mutableLibrary == null)
             {
                 Debug.LogError("Failed to get MutableRuntimeReferenceImageLibrary.");
-                text.text = "Failed to get MutableRuntimeReferenceImageLibrary.";
+                SetUIText("Failed to get MutableRuntimeReferenceImageLibrary.");
                 yield break;
             }
 
-            ClearExistingLibrary();
-
+            Dictionary<Texture2D, XRInfo> reconstructedImages = new Dictionary<Texture2D, XRInfo>();
             foreach (ImageObject imageObject in imageObjects)
             {
-                if (!_existingImageNames.Contains(imageObject.name))
+                byte[] imageBytes = System.Convert.FromBase64String(imageObject.image);
+                Texture2D texture = new Texture2D(2, 2);
+                texture.LoadImage(imageBytes);
+                texture.hideFlags = HideFlags.DontUnloadUnusedAsset;
+
+                // Verify the texture dimensions
+                if (texture.width == 0 || texture.height == 0)
                 {
-                    AddImageToLibrary(imageObject);
-                    _existingImageNames.Add(imageObject.name);
+                    Debug.LogError($"Invalid image dimensions for {imageObject.name}");
+                    continue;
                 }
+
+                XRInfo xrInfo = new XRInfo
+                {
+                    name = imageObject.name,
+                    specifySize = true,
+                    size = new Vector2(0.5f, 0.5f) // Exemple de taille, à ajuster selon les besoins
+                };
+
+                reconstructedImages.Add(texture, xrInfo);
             }
+
+            AddImagesToLibrary(_mutableLibrary, reconstructedImages);
         }
     }
 
-    private void ClearExistingLibrary()
+    private void AddImagesToLibrary(MutableRuntimeReferenceImageLibrary mutableLibrary, Dictionary<Texture2D, XRInfo> reconstructedImages)
     {
-        _mutableLibrary = _trackedImageManager.CreateRuntimeLibrary() as MutableRuntimeReferenceImageLibrary;
-        _trackedImageManager.referenceLibrary = _mutableLibrary;
-        _existingImageNames.Clear();
-    }
+        foreach (KeyValuePair<Texture2D, XRInfo> entry in reconstructedImages)
+        {
+            try
+            {
+                Texture2D newImageTexture = entry.Key;
+                string newImageName = entry.Value.name;
+                float? newImageWidthInMeters = entry.Value.specifySize ? entry.Value.size.x : (float?)null;
 
-    private void AddImageToLibrary(ImageObject imageObject)
-    {
-        byte[] imageBytes = System.Convert.FromBase64String(imageObject.image);
-        Texture2D texture = new Texture2D(2, 2);
-        texture.LoadImage(imageBytes);
-        texture.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                // Log texture info
+                Debug.Log($"Adding image {newImageName} with size {newImageTexture.width}x{newImageTexture.height} and width {newImageWidthInMeters} meters");
 
-        // Différer la mise à jour du RawImage pour éviter l'erreur de boucle de reconstruction graphique
-        StartCoroutine(UpdateRawImage(texture));
+                AddReferenceImageJobState jobState = mutableLibrary.ScheduleAddImageWithValidationJob(
+                    newImageTexture,
+                    newImageName,
+                    newImageWidthInMeters
+                );
 
-        // Définir une taille par défaut en mètres
-        float defaultSize = 0.5f; // Par exemple, 0.5 mètres
+                JobHandle jobHandle = jobState.jobHandle;
+                jobHandle.Complete();
 
-        // Ajouter l'image à la bibliothèque mutable avec la taille par défaut
-        _mutableLibrary.ScheduleAddImageWithValidationJob(texture, imageObject.name, defaultSize);
-        Debug.Log("Nombre d'images : " + _trackedImageManager.referenceLibrary.count);
-    }
-
-    private IEnumerator UpdateRawImage(Texture2D texture)
-    {
-        yield return new WaitForEndOfFrame();
-        imageTest.texture = texture;
+                if (jobState.status == AddReferenceImageJobStatus.Success)
+                {
+                    Debug.Log($"Image {newImageName} added to library successfully.");
+                }
+                else
+                {
+                    Debug.LogWarning($"Failed to add image {newImageName} to library. {jobState.status}");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Failed to add image {entry.Value.name} to library. {e}");
+            }
+        }
     }
 
     private void OnTrackedImagesChanged(ARTrackedImagesChangedEventArgs eventArgs)
     {
         foreach (ARTrackedImage trackedImage in eventArgs.added)
         {
-            text.text = "Image Detected";
+            SetUIText("Image Detected");
+            Debug.Log("Image détectée");
 
-            if (_mutableLibrary.count > 0)
+            if (!_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
             {
-                if (!_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
+                ARAnchor anchor = _anchorManager.AddAnchor(new Pose(trackedImage.transform.position, Quaternion.identity));
+                if (anchor != null)
                 {
-                    GameObject newPrefab = Instantiate(prefabToSpawn, trackedImage.transform);
+                    GameObject newPrefab = Instantiate(prefabToSpawn, anchor.transform);
                     newPrefab.SetActive(true);
                     _instantiatedPrefabs.Add(trackedImage.referenceImage.name, newPrefab);
-                    //text.text = trackedImage.referenceImage.name;
+                    _anchors.Add(trackedImage.referenceImage.name, anchor);
+                    Debug.Log(trackedImage.referenceImage.name);
                 }
             }
 
@@ -146,7 +168,14 @@ public class ObjectInstantiator : MonoBehaviour
         {
             if (_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
             {
-                _instantiatedPrefabs[trackedImage.referenceImage.name].SetActive(false);
+                Destroy(_instantiatedPrefabs[trackedImage.referenceImage.name]);
+                _instantiatedPrefabs.Remove(trackedImage.referenceImage.name);
+            }
+
+            if (_anchors.ContainsKey(trackedImage.referenceImage.name))
+            {
+                Destroy(_anchors[trackedImage.referenceImage.name]);
+                _anchors.Remove(trackedImage.referenceImage.name);
             }
         }
     }
@@ -155,12 +184,28 @@ public class ObjectInstantiator : MonoBehaviour
     {
         if (_instantiatedPrefabs.TryGetValue(trackedImage.referenceImage.name, out GameObject prefab))
         {
-            prefab.transform.localPosition = new Vector3(trackedImage.size.x / 2, 0, 0);
-            Vector3 imageRot = trackedImage.transform.rotation.eulerAngles;
-            prefab.transform.rotation = Quaternion.Euler(new Vector3(imageRot.x + 90, imageRot.y, imageRot.z));
+            if (_anchors.TryGetValue(trackedImage.referenceImage.name, out ARAnchor anchor))
+            {
+                anchor.transform.position = trackedImage.transform.position;
+                anchor.transform.rotation = trackedImage.transform.rotation;
+            }
+
+            prefab.transform.localPosition = Vector3.zero;
+            prefab.transform.localRotation = Quaternion.identity;
+
+            // Apply the tracked image's rotation to the prefab and adjust its orientation
+            Quaternion imageRotation = trackedImage.transform.rotation;
+            Quaternion correctionRotation = Quaternion.Euler(90, 0, 0); // Adjust this as needed
+            prefab.transform.rotation = imageRotation * correctionRotation;
+
             Vector3 newScale = new Vector3(trackedImage.size.x, trackedImage.size.y, 0.1f);
             prefab.transform.localScale = newScale;
         }
+    }
+
+    private void SetUIText(string message)
+    {
+        text.text = message;
     }
 }
 
@@ -176,6 +221,13 @@ public class ImageObject
 public class ImageObjectList
 {
     public List<ImageObject> images;
+}
+
+public class XRInfo
+{
+    public string name;
+    public bool specifySize;
+    public Vector2 size;
 }
 
 public class AcceptAllCertificatesSignedHandler : CertificateHandler
