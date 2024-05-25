@@ -34,7 +34,7 @@ public class ObjectInstantiator : MonoBehaviour
 
     private void OnEnable()
     {
-        StartCoroutine(FetchAndLoadImages());
+        StartCoroutine(WaitForSessionAndFetchImages());
         _trackedImageManager.trackedImagesChanged += OnTrackedImagesChanged;
     }
 
@@ -43,9 +43,22 @@ public class ObjectInstantiator : MonoBehaviour
         _trackedImageManager.trackedImagesChanged -= OnTrackedImagesChanged;
     }
 
+    private IEnumerator WaitForSessionAndFetchImages()
+    {
+        // Attendre que la session AR soit prête
+        while (ARSession.state != ARSessionState.SessionInitializing)
+        {
+            yield return null;
+        }
+
+        // Une fois la session AR prête, récupérer et charger les images
+        StartCoroutine(FetchAndLoadImages());
+    }
+
     private IEnumerator FetchAndLoadImages()
     {
         UnityWebRequest request = UnityWebRequest.Get(apiUrl);
+        request.certificateHandler = new AcceptAllCertificatesSignedHandler();
         yield return request.SendWebRequest();
         SetUIText("Fetching");
 
@@ -74,8 +87,15 @@ public class ObjectInstantiator : MonoBehaviour
             {
                 byte[] imageBytes = System.Convert.FromBase64String(imageObject.image);
                 Texture2D texture = new Texture2D(2, 2);
-                texture.LoadImage(imageBytes);
+                bool isLoaded = texture.LoadImage(imageBytes);
                 texture.hideFlags = HideFlags.DontUnloadUnusedAsset;
+
+                // Vérifiez que l'image est chargée correctement
+                if (!isLoaded)
+                {
+                    Debug.LogError($"Failed to load image {imageObject.name}");
+                    continue;
+                }
 
                 // Verify the texture dimensions
                 if (texture.width == 0 || texture.height == 0)
