@@ -23,13 +23,20 @@ public class ObjectInstantiator : MonoBehaviour
 
     private readonly Dictionary<string, GameObject> _instantiatedPrefabs = new Dictionary<string, GameObject>();
     private readonly Dictionary<string, ARAnchor> _anchors = new Dictionary<string, ARAnchor>();
+    private readonly Dictionary<string, string> _imageTexts = new Dictionary<string, string>();
 
     private const string apiUrl = "http://192.168.1.100:8080/api/images/";
+
+    [SerializeField] private GameObject panel;
+    [SerializeField] private TMP_Text panelText;
+    [SerializeField] private Button closeButton;
 
     private void Awake()
     {
         _trackedImageManager = GetComponent<ARTrackedImageManager>();
         _anchorManager = GetComponent<ARAnchorManager>();
+        panel.SetActive(false);
+        closeButton.onClick.AddListener(ClosePanel);
     }
 
     private void OnEnable()
@@ -112,6 +119,7 @@ public class ObjectInstantiator : MonoBehaviour
                 };
 
                 reconstructedImages.Add(texture, xrInfo);
+                _imageTexts[imageObject.name] = imageObject.text;
             }
 
             AddImagesToLibrary(_mutableLibrary, reconstructedImages);
@@ -170,6 +178,11 @@ public class ObjectInstantiator : MonoBehaviour
                 {
                     GameObject newPrefab = Instantiate(prefabToSpawn, anchor.transform);
                     newPrefab.SetActive(true);
+                    if (newPrefab.GetComponent<Collider>() == null)
+                    {
+                        newPrefab.AddComponent<BoxCollider>(); // Add a BoxCollider if there is no Collider attached
+                    }
+                    SetPrefabText(newPrefab, trackedImage.referenceImage.name); // Set the text
                     _instantiatedPrefabs.Add(trackedImage.referenceImage.name, newPrefab);
                     _anchors.Add(trackedImage.referenceImage.name, anchor);
                     Debug.Log(trackedImage.referenceImage.name);
@@ -188,14 +201,7 @@ public class ObjectInstantiator : MonoBehaviour
         {
             if (_instantiatedPrefabs.ContainsKey(trackedImage.referenceImage.name))
             {
-                Destroy(_instantiatedPrefabs[trackedImage.referenceImage.name]);
-                _instantiatedPrefabs.Remove(trackedImage.referenceImage.name);
-            }
-
-            if (_anchors.ContainsKey(trackedImage.referenceImage.name))
-            {
-                Destroy(_anchors[trackedImage.referenceImage.name]);
-                _anchors.Remove(trackedImage.referenceImage.name);
+                _instantiatedPrefabs[trackedImage.referenceImage.name].SetActive(false);
             }
         }
     }
@@ -204,6 +210,8 @@ public class ObjectInstantiator : MonoBehaviour
     {
         if (_instantiatedPrefabs.TryGetValue(trackedImage.referenceImage.name, out GameObject prefab))
         {
+            prefab.SetActive(trackedImage.trackingState == TrackingState.Tracking);
+
             if (_anchors.TryGetValue(trackedImage.referenceImage.name, out ARAnchor anchor))
             {
                 anchor.transform.position = trackedImage.transform.position;
@@ -226,6 +234,100 @@ public class ObjectInstantiator : MonoBehaviour
     private void SetUIText(string message)
     {
         text.text = message;
+    }
+
+    private void SetPrefabText(GameObject prefab, string imageName)
+    {
+        TMP_Text prefabText = prefab.GetComponentInChildren<TMP_Text>();
+        if (prefabText != null)
+        {
+            prefabText.text = imageName;
+        }
+    }
+
+    private void Update()
+    {
+        if (Input.GetMouseButtonDown(0))
+        {
+            Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+            if (Physics.Raycast(ray, out RaycastHit hit))
+            {
+                GameObject hitObject = hit.collider.gameObject;
+                foreach (var kvp in _instantiatedPrefabs)
+                {
+                    if (kvp.Value == hitObject)
+                    {
+                        OnPrefabClicked(kvp.Key);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    private void OnPrefabClicked(string imageName)
+    {
+        if (_imageTexts.TryGetValue(imageName, out string imageText))
+        {
+            panelText.text = imageText;
+            StartCoroutine(ShowPanel());
+        }
+    }
+
+    private IEnumerator ShowPanel()
+    {
+        panel.SetActive(true);
+        CanvasGroup canvasGroup = panel.GetComponent<CanvasGroup>();
+        if (canvasGroup == null)
+        {
+            canvasGroup = panel.AddComponent<CanvasGroup>();
+        }
+
+        panel.transform.localPosition = new Vector3(0, -Screen.height, 0);
+        canvasGroup.alpha = 0;
+
+        float duration = 0.5f;
+        float elapsedTime = 0f;
+
+        while (elapsedTime < duration)
+        {
+            elapsedTime += Time.deltaTime;
+            panel.transform.localPosition = Vector3.Lerp(new Vector3(0, -Screen.height, 0), Vector3.zero, elapsedTime / duration);
+            canvasGroup.alpha = Mathf.Lerp(0, 1, elapsedTime / duration);
+            yield return null;
+        }
+
+        panel.transform.localPosition = Vector3.zero;
+        canvasGroup.alpha = 1;
+    }
+
+    private void ClosePanel()
+    {
+        StartCoroutine(HidePanel());
+    }
+
+    private IEnumerator HidePanel()
+    {
+        CanvasGroup canvasGroup = panel.GetComponent<CanvasGroup>();
+        if (canvasGroup == null)
+        {
+            canvasGroup = panel.AddComponent<CanvasGroup>();
+        }
+
+        float duration = 0.5f;
+        float elapsedTime = 0f;
+
+        while (elapsedTime < duration)
+        {
+            elapsedTime += Time.deltaTime;
+            panel.transform.localPosition = Vector3.Lerp(Vector3.zero, new Vector3(0, -Screen.height, 0), elapsedTime / duration);
+            canvasGroup.alpha = Mathf.Lerp(1, 0, elapsedTime / duration);
+            yield return null;
+        }
+
+        panel.transform.localPosition = new Vector3(0, -Screen.height, 0);
+        canvasGroup.alpha = 0;
+        panel.SetActive(false);
     }
 }
 
